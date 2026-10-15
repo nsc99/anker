@@ -179,6 +179,59 @@ uses synthetic Anki collections. `nix build` runs this suite too. Plain
 `go test` skips the database integration test unless `ANKER_TEST_DATABASE_URL`
 is set to a **disposable** database; that test resets the `anker` schema.
 
+## Container images and releases
+
+GitHub Actions builds and tests native Linux `amd64` and `arm64` images on pull
+requests and before publishing, using the locked Nix dependencies. The workflow runs the PostgreSQL integration suite,
+`go vet`, and a synthetic sync smoke test inside each non-root container before
+publishing a multi-platform image to `ghcr.io/nsc99/anker`.
+
+- Every push to `master` publishes `latest` and `sha-<full commit SHA>`.
+- Publishing a GitHub release with a tag such as `vMAJOR.MINOR.PATCH` publishes
+  that exact version tag and its commit tag. Prereleases can use a suffix such
+  as `-rc.1`. Release builds leave the rolling `latest` tag unchanged.
+- Manual runs publish the selected revision's commit tag only.
+
+To release, first merge and check the default-branch image workflow, then create
+and publish a GitHub release targeting that tested commit with a new version
+tag and release notes describing changes, migration steps, and known limitations.
+Consider enabling GitHub immutable releases in repository settings to protect
+published tags. Prepare a draft and attach any GitHub release assets before
+publishing it. See [release practices](docs/RELEASING.md) for the full checklist.
+The release workflow rebuilds and tests both platforms
+before publishing the version tag. Check its success before announcing that the
+image is available. Keep existing release tags fixed; publish a new patch
+release for corrections. Pin deployments to an image digest for an exact,
+repeatable artifact, and retain the previous digest for rollback.
+
+The workflow uses GitHub's short-lived `GITHUB_TOKEN`, granting package write
+access only to its publishing job. Actions are pinned by full commit SHA; Nix
+and Go dependencies retain this repository's lock files. No registry password
+or long-lived publishing token is required. Package visibility follows GHCR
+settings; a private package requires authentication to pull.
+
+For local builds on Linux:
+
+```sh
+nix build .#container
+docker load --input result
+```
+
+Run the published image with your private configuration:
+
+```sh
+docker run --rm --env-file .env -p 127.0.0.1:8080:8080 \
+  ghcr.io/nsc99/anker:latest
+```
+
+In PostgreSQL mode, provide writable `/tmp`; persistent filesystem storage is
+unnecessary. In local-file mode, mount a volume at `/data`, writable by UID/GID
+`10001:10001`, to preserve snapshots across container replacements. The image
+binds to `0.0.0.0:8080` internally and includes TLS trust certificates. If `.env`
+sets `ANKER_LISTEN`, ensure it also binds to `0.0.0.0:8080` inside the container.
+Secrets referenced through `*_FILE` variables must be mounted and readable by
+that UID. Use `/healthz` and `/readyz` for your orchestrator's probes.
+
 ## Synchronization
 
 On startup and every configured interval, Anker logs in, checks sync metadata,

@@ -38,10 +38,34 @@
               runHook postCheck
             '';
           };
+          anker = build [ "cmd/anker" ];
         in {
-          default = build [ "cmd/anker" ];
+          default = anker;
           # The default package already runs tests for every Go package.
           demo-server = (build [ "cmd/anker-demo" ]).overrideAttrs { doCheck = false; };
+        } // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+          container = pkgs.dockerTools.buildLayeredImage {
+            name = "anker";
+            tag = "local";
+            contents = [ anker pkgs.cacert ];
+            fakeRootCommands = ''
+              mkdir -p ./data ./tmp
+              chown 10001:10001 ./data
+              chmod 1777 ./tmp
+            '';
+            config = {
+              Entrypoint = [ "${anker}/bin/anker" ];
+              User = "10001:10001";
+              WorkingDir = "/data";
+              Env = [
+                "ANKER_LISTEN=0.0.0.0:8080"
+                "ANKER_DATA_DIR=/data"
+                "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
+              ];
+              ExposedPorts = { "8080/tcp" = {}; };
+              Labels."org.opencontainers.image.source" = "https://github.com/nsc99/anker";
+            };
+          };
         });
       apps = forAllSystems (system:
         let
