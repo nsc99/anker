@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -186,6 +187,30 @@ func (s *Service) Handler() http.Handler {
 		}
 		now := time.Now()
 		json.NewEncoder(w).Encode(Response{Stats: col.Stats(now, s.config.Location), LastSuccessfulSync: last, Stale: failed || now.Sub(last) > s.config.StaleAfter, SyncOK: !failed})
+	})
+	mux.HandleFunc("GET /activity", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		count := 365
+		if values, present := r.URL.Query()["days"]; present {
+			var err error
+			count, err = strconv.Atoi(values[0])
+			if err != nil || len(values) != 1 || count < 1 || count > 3660 {
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(map[string]string{"error": "days must be an integer between 1 and 3660"})
+				return
+			}
+		}
+		s.mu.RLock()
+		col, last, failed := s.collection, s.lastSuccess, s.failed
+		s.mu.RUnlock()
+		if col == nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			json.NewEncoder(w).Encode(map[string]string{"error": "no successful sync yet"})
+			return
+		}
+		now := time.Now()
+		json.NewEncoder(w).Encode(ActivityResponse{Activity: col.Activity(now, s.config.Location, count), LastSuccessfulSync: last, Stale: failed || now.Sub(last) > s.config.StaleAfter, SyncOK: !failed})
 	})
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
 		s.mu.RLock()

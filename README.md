@@ -259,6 +259,9 @@ In file mode, only run one exporter per data directory.
 ## API
 
 - `GET /stats`: statistics JSON; HTTP 503 before a valid snapshot exists.
+- `GET /activity?days=365`: daily history for an activity grid; HTTP 503
+  before a valid snapshot exists. `days` defaults to 365 and accepts 1–3660;
+  invalid or repeated values return HTTP 400.
 - `GET /healthz`: process health; HTTP 200.
 - `GET /readyz`: HTTP 200 with a current snapshot and successful refresh,
   otherwise HTTP 503.
@@ -292,6 +295,38 @@ Days use the collection's `rollover` hour (default 04:00 for modern collections)
 and `ANKER_TIMEZONE`, with calendar dates across daylight saving changes.
 Stats are calculated at request time, so day rollover works even while offline.
 Anker reads both legacy JSON configuration and modern configuration tables.
+
+### Activity grid data
+
+`/activity` prepares the data for a future Anki-style study heatmap. It returns
+one cell per study day, oldest first, including days with zero reviews. Each
+cell has `date` (`YYYY-MM-DD`), `reviews`, and `study_time_seconds`. A UI can
+group these cells into calendar weeks and shade each cell by review count;
+zero-review cells show missed days. Dates are study-day labels, so use them
+directly rather than converting them from UTC timestamps in the browser.
+
+The response also includes `study_day`, `rollover_hour`, `timezone`,
+`study_streak`, `last_successful_sync`, `stale`, and `sync_ok`, with the same
+meaning as `/stats`. The streak considers all available history, even if it
+starts before the requested window. Daily counts use the same answer filters,
+timezone, and rollover as today's statistics; future answers are excluded.
+History remains available after a failed refresh, marked stale. Both storage
+modes retain the full review history, so no additional database migration or
+collection download is required.
+
+```sh
+curl 'http://localhost:8080/activity?days=365'
+```
+
+Example cells within the response's `days` array:
+
+```json
+[
+  {"date": "2026-10-13", "reviews": 12, "study_time_seconds": 85},
+  {"date": "2026-10-14", "reviews": 0, "study_time_seconds": 0},
+  {"date": "2026-10-15", "reviews": 42, "study_time_seconds": 305.5}
+]
+```
 
 ## Homepage
 
