@@ -28,6 +28,13 @@ func run() error {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	service := exporter.NewService(config)
+	startupCtx, startupCancel := context.WithTimeout(ctx, 30*time.Second)
+	err = service.Prepare(startupCtx)
+	startupCancel()
+	if err != nil {
+		return err
+	}
+	defer service.Close()
 	done := make(chan struct{})
 	go func() { defer close(done); service.Run(ctx) }()
 	server := &http.Server{Addr: config.Listen, Handler: service.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}

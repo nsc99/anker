@@ -3,6 +3,7 @@ package exporter
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -18,6 +19,8 @@ type Service struct {
 	collection  *Collection
 	lastSuccess time.Time
 	failed      bool
+	database    *PostgresStore
+	tempDir     string
 }
 
 type Response struct {
@@ -27,10 +30,53 @@ type Response struct {
 	SyncOK             bool      `json:"sync_ok"`
 }
 
-func NewService(c Config) *Service      { return &Service{config: c, client: NewSyncClient(c)} }
+func NewService(c Config) *Service { return &Service{config: c, client: NewSyncClient(c)} }
+
+// Prepare initializes durable storage before the HTTP server starts.
+func (s *Service) Prepare(ctx context.Context) error {
+	if s.config.DatabaseURL == "" {
+		return nil
+	}
+	database, err := NewPostgresStore(ctx, s.config.DatabaseURL)
+	if err != nil {
+		return err
+	}
+	directory, err := os.MkdirTemp("", "anker-sync-")
+	if err != nil {
+		database.Close()
+		return err
+	}
+	s.database = database
+	s.tempDir = directory
+	s.client.config.DataDir = directory
+	return nil
+}
+
+func (s *Service) Close() {
+	if s.database != nil {
+		s.database.Close()
+	}
+	if s.tempDir != "" {
+		os.RemoveAll(s.tempDir)
+	}
+}
+
 func (s *Service) snapshotPath() string { return filepath.Join(s.config.DataDir, "collection.anki2") }
 
 func (s *Service) loadSnapshot(ctx context.Context) {
+	if s.database != nil {
+		col, syncedAt, err := s.database.Load(ctx)
+		if err != nil {
+			slog.Error("restore PostgreSQL snapshot failed", "error", err)
+			return
+		}
+		s.mu.Lock()
+		s.collection = col
+		s.lastSuccess = syncedAt
+		s.mu.Unlock()
+		return
+	}
+
 	if col, err := ReadCollection(ctx, s.snapshotPath()); err == nil {
 		if info, err := os.Stat(s.snapshotPath()); err == nil {
 			s.mu.Lock()
@@ -70,6 +116,33 @@ func (s *Service) refresh(parent context.Context) {
 	}
 }
 func (s *Service) sync(ctx context.Context) error {
+	if s.config.DatabaseURL != "" && s.database == nil {
+		return fmt.Errorf("PostgreSQL storage was not initialized")
+	}
+	if s.database != nil {
+		col, syncedAt, err := s.database.Sync(ctx, s.config.Interval, func() (*Collection, time.Time, error) {
+			path, err := s.client.Download(ctx)
+			if err != nil {
+				return nil, time.Time{}, err
+			}
+			defer os.Remove(path)
+			col, err := ReadCollection(ctx, path)
+			if err != nil {
+				return nil, time.Time{}, err
+			}
+			return col, time.Now().UTC(), nil
+		})
+		if err != nil {
+			return err
+		}
+		s.mu.Lock()
+		s.collection = col
+		s.lastSuccess = syncedAt
+		s.failed = false
+		s.mu.Unlock()
+		return nil
+	}
+
 	path, err := s.client.Download(ctx)
 	if err != nil {
 		return err

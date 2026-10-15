@@ -6,7 +6,8 @@ It runs without Anki Desktop and never opens the sync server's live database.
 
 ## Develop and run
 
-Nix flakes provide Go, gopls, and the C compiler environment needed by SQLite.
+Nix flakes provide Go, gopls, PostgreSQL tools, and the C compiler environment
+needed to read Anki collections.
 No Homebrew packages or global Go installation are required. Go's module and
 build caches stay in the ignored `.cache/` directory in this repository.
 
@@ -40,6 +41,7 @@ through a browser login flow.
 
 ```sh
 nix develop --command go test -race ./...
+nix develop --command ./scripts/test-postgres.sh
 nix develop --command go vet ./...
 nix build
 ./result/bin/anker
@@ -59,7 +61,9 @@ index before using the commands above.
 | `ANKER_PASSWORD_FILE` | unset | File containing the password |
 | `ANKER_TIMEZONE` | `UTC` | IANA timezone used for study days |
 | `ANKER_LISTEN` | `127.0.0.1:8080` | HTTP bind address |
-| `ANKER_DATA_DIR` | `data` | Private snapshot directory |
+| `ANKER_DATA_DIR` | `data` | Private snapshot directory; ignored in PostgreSQL mode |
+| `ANKER_DATABASE_URL` | unset | PostgreSQL connection URL; enables PostgreSQL storage |
+| `ANKER_DATABASE_URL_FILE` | unset | File containing the database URL; takes precedence |
 | `ANKER_SYNC_INTERVAL` | `15m` | Time between refresh attempts |
 | `ANKER_SYNC_TIMEOUT` | `5m` | Total timeout for each refresh |
 | `ANKER_STALE_AFTER` | `30m` | Maximum age before marking statistics stale |
@@ -69,11 +73,60 @@ collections are ignored by Git. The API binds to loopback by default; expose
 it on your private network or behind your existing authenticated proxy if
 Homepage runs elsewhere. The API itself has no authentication.
 
+## PostgreSQL storage and deployment
+
+Set `ANKER_DATABASE_URL` in your secret configuration to enable PostgreSQL mode:
+
+```dotenv
+ANKER_DATABASE_URL='postgresql://anker:password@db.example/anker?sslmode=verify-full'
+ANKER_LISTEN=0.0.0.0:8080
+```
+
+Or mount a private connection-string file and set `ANKER_DATABASE_URL_FILE`.
+The database must already exist. At startup Anker creates its `anker` schema;
+the database role needs permission to create that schema and its tables.
+Connection strings and database error details are excluded from logs.
+
+PostgreSQL stores the review history, rollover hour, and last successful sync
+in `anker.reviews` and `anker.collection_state`. Each refresh replaces history
+and metadata atomically using a transaction and bulk COPY. Downloads or writes
+that fail leave the previous committed snapshot intact. Restarted instances
+restore it from PostgreSQL before refreshing.
+
+No persistent filesystem volume is required in this mode. Anki still delivers
+SQLite files over its sync protocol; Anker downloads them into a private
+temporary directory, validates and imports them, then deletes them. Provide
+writable temporary storage (for example `/tmp`, or set `TMPDIR`), sized for your
+collection up to the 1 GiB download limit. Review history is also cached in RAM.
+`ANKER_DATA_DIR` is unused in this mode. Without a database URL, Anker retains
+its original local-file storage behavior.
+
+For deployment, provide the Anki and database credentials as secrets, bind to
+`0.0.0.0:8080`, use `/healthz` for liveness and `/readyz` for readiness, and manage
+PostgreSQL backups through your database provider. One database holds one Anki
+collection. Replicas sharing it must use the same account and configuration.
+A transactional advisory lock and shared sync timestamp allow one refresh per
+configured interval across replicas; the others restore the last committed data. Set PostgreSQL's
+`idle_in_transaction_session_timeout` above `ANKER_SYNC_TIMEOUT`, since the lock
+is held during synchronization.
+
+Run the full integration suite locally with:
+
+```sh
+nix develop --command ./scripts/test-postgres.sh
+```
+
+This starts a disposable PostgreSQL cluster on a private Unix socket, runs race
+tests, and removes the cluster afterward. It installs no global service and
+uses synthetic Anki collections. `nix build` runs this suite too. Plain
+`go test` skips the database integration test unless `ANKER_TEST_DATABASE_URL`
+is set to a **disposable** database; that test resets the `anker` schema.
+
 ## Synchronization
 
 On startup and every configured interval, Anker logs in, checks sync metadata,
 resolves the account’s sync server, and downloads the full collection using Anki's sync protocol 11 (zstd). It validates SQLite integrity
-and required tables before atomically replacing its private snapshot. It never
+and required tables before atomically replacing its stored snapshot. It never
 uploads changes or downloads media. Snapshots are limited to 1 GiB after
 decompression; review history is cached in memory.
 
@@ -88,9 +141,10 @@ and the [upstream download implementation](https://github.com/ankitects/anki/blo
 
 If login, download, or validation fails, the last successful snapshot stays
 available with `stale: true` and `sync_ok: false`. A restart restores the snapshot
-and its last sync time (stored as the snapshot's modification time). A new
+and its last sync time (stored in PostgreSQL metadata, or the local snapshot's
+modification time in file mode). A new
 instance with no valid snapshot returns HTTP 503 until a download succeeds.
-Only run one exporter per data directory.
+In file mode, only run one exporter per data directory.
 
 ## API
 
@@ -180,3 +234,9 @@ baseline, not the exporter’s release version.
 SQLite connections register Anki’s `unicase` collation with Unicode case folding.
 The implementation uses `golang.org/x/text v0.43.0`, verified with
 `go list -m golang.org/x/text@latest` through the Go module registry.
+
+PostgreSQL integration uses `github.com/jackc/pgx/v5 v5.11.0`, verified with
+`go list -m github.com/jackc/pgx/v5@latest`. Development and integration-test tools
+use PostgreSQL `18.6`, verified with
+`nix eval --inputs-from . --raw nixpkgs#postgresql.version` against the locked
+nixpkgs. Transitive Go dependencies are resolved and pinned by `go mod tidy`.

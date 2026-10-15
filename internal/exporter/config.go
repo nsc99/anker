@@ -10,12 +10,24 @@ import (
 
 type Config struct {
 	Listen, ServerURL, Username, Password, DataDir string
+	DatabaseURL                                    string
 	Interval, Timeout, StaleAfter                  time.Duration
 	Location                                       *time.Location
 }
 
 func LoadConfig() (Config, error) {
 	c := Config{Listen: env("ANKER_LISTEN", "127.0.0.1:8080"), ServerURL: os.Getenv("ANKER_SYNC_URL"), Username: os.Getenv("ANKER_USERNAME"), DataDir: env("ANKER_DATA_DIR", "data")}
+	c.DatabaseURL = os.Getenv("ANKER_DATABASE_URL")
+	if file := os.Getenv("ANKER_DATABASE_URL_FILE"); file != "" {
+		b, err := os.ReadFile(file)
+		if err != nil {
+			return c, fmt.Errorf("read database URL file: %w", err)
+		}
+		c.DatabaseURL = strings.TrimSpace(string(b))
+		if c.DatabaseURL == "" {
+			return c, fmt.Errorf("database URL file is empty")
+		}
+	}
 	c.Password = os.Getenv("ANKER_PASSWORD")
 	if file := os.Getenv("ANKER_PASSWORD_FILE"); file != "" {
 		b, err := os.ReadFile(file)
