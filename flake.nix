@@ -10,7 +10,7 @@
     in {
       devShells = forAllSystems (system: let pkgs = nixpkgs.legacyPackages.${system}; in {
         default = pkgs.mkShell {
-          packages = [ pkgs.go pkgs.gopls (pkgs.lib.getBin pkgs.postgresql) ];
+          packages = [ pkgs.go pkgs.gopls pkgs.delve (pkgs.lib.getBin pkgs.postgresql) ];
           CGO_ENABLED = "1";
           shellHook = ''
             export GOPATH="$PWD/.cache/go"
