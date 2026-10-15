@@ -7,3 +7,6 @@ data/
 *.colpkg
 *.apkg
 .DS_Store
+.cache/
+result
+/anker
