@@ -7,10 +7,22 @@ import (
 	"fmt"
 	"net/url"
 	"path/filepath"
+	"strings"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
+	"github.com/mattn/go-sqlite3"
+	"golang.org/x/text/cases"
 )
+
+// Anki schemas reference a custom Unicode case-insensitive collation even
+// when only the review log is queried. Register it on every private connection.
+func init() {
+	sql.Register("anki-sqlite3", &sqlite3.SQLiteDriver{ConnectHook: func(conn *sqlite3.SQLiteConn) error {
+		return conn.RegisterCollation("unicase", func(a, b string) int {
+			return strings.Compare(cases.Fold().String(a), cases.Fold().String(b))
+		})
+	}})
+}
 
 type Stats struct {
 	ReviewsToday     int      `json:"reviews_today"`
@@ -37,7 +49,7 @@ func ReadCollection(ctx context.Context, path string) (*Collection, error) {
 		return nil, err
 	}
 	u := url.URL{Scheme: "file", Path: absolute, RawQuery: "mode=ro&immutable=1"}
-	db, err := sql.Open("sqlite3", u.String())
+	db, err := sql.Open("anki-sqlite3", u.String())
 	if err != nil {
 		return nil, err
 	}

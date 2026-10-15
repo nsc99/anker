@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -43,13 +44,13 @@ func TestStatsRolloverAndRetention(t *testing.T) {
 func fixture(t *testing.T, modern bool) []byte {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "collection.anki2")
-	db, err := sql.Open("sqlite3", path)
+	db, err := sql.Open("anki-sqlite3", path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	schema := `CREATE TABLE col (ver INTEGER, conf TEXT, crt INTEGER); CREATE TABLE revlog (id INTEGER, ease INTEGER, type INTEGER, time INTEGER);`
 	if modern {
-		schema += `INSERT INTO col VALUES (18, '', 0); CREATE TABLE config (key TEXT, val BLOB); INSERT INTO config VALUES ('rollover', X'36');`
+		schema += `INSERT INTO col VALUES (18, '', 0); CREATE TABLE tags (tag TEXT COLLATE unicase PRIMARY KEY); INSERT INTO tags VALUES ('Straße'); CREATE TABLE config (key TEXT, val BLOB); INSERT INTO config VALUES ('rollover', X'36');`
 	} else {
 		schema += `INSERT INTO col VALUES (11, '{"rollover":6}', 0);`
 	}
@@ -87,7 +88,7 @@ func TestDownloadSnapshotAndFailureRecovery(t *testing.T) {
 		if err := json.Unmarshal([]byte(r.Header.Get("anki-sync")), &header); err != nil {
 			t.Error(err)
 		}
-		if header.V != syncProtocol || header.S == "" {
+		if header.V != syncProtocol || header.S == "" || len(strings.Split(header.C, ",")) != 3 {
 			t.Errorf("bad sync header: %+v", header)
 		}
 		dec, err := zstd.NewReader(r.Body)
@@ -112,6 +113,18 @@ func TestDownloadSnapshotAndFailureRecovery(t *testing.T) {
 				t.Error("incorrect authentication")
 			}
 			response = []byte(`{"key":"secret-key"}`)
+		case "/sync/meta":
+			if header.K != "secret-key" {
+				t.Error("metadata missing authentication")
+			}
+			var meta struct {
+				V  int    `json:"v"`
+				CV string `json:"cv"`
+			}
+			if err := json.Unmarshal(payload, &meta); err != nil || meta.V != syncProtocol || len(strings.Split(meta.CV, ",")) != 3 || !strings.HasPrefix(meta.CV, "anki,") {
+				t.Error("invalid metadata client-version format")
+			}
+			response = []byte(`{"cont":true}`)
 		case "/sync/download":
 			if header.K != "secret-key" || string(payload) != "{}" {
 				t.Error("invalid download request")
@@ -188,5 +201,25 @@ func TestLegacyCollection(t *testing.T) {
 	col, err := ReadCollection(context.Background(), path)
 	if err != nil || col.Rollover != 6 {
 		t.Fatalf("legacy rollover: %+v, %v", col, err)
+	}
+}
+
+func TestAnkiUnicodeCollation(t *testing.T) {
+	db, err := sql.Open("anki-sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	for _, pair := range [][2]string{{"Straße", "STRASSE"}, {"Σ", "ς"}, {"K", "K"}} {
+		var equal bool
+		if err := db.QueryRow("SELECT ? = ? COLLATE unicase", pair[0], pair[1]).Scan(&equal); err != nil || !equal {
+			t.Fatalf("Unicode comparison failed for %q: %v", pair, err)
+		}
+	}
+	if _, err := db.Exec("CREATE TABLE tags (name TEXT COLLATE unicase UNIQUE); INSERT INTO tags VALUES ('Straße')"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("INSERT INTO tags VALUES ('STRASSE')"); err == nil {
+		t.Fatal("unicase uniqueness was not enforced")
 	}
 }

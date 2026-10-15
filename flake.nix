@@ -25,7 +25,7 @@
             root = ./.;
             fileset = pkgs.lib.fileset.unions [ ./cmd ./internal ./go.mod ./go.sum ];
           };
-          vendorHash = "sha256-A/4+dZgywEjH5C/2G+vu6jB3t+xXzraFcp3qEulJtFE=";
+          vendorHash = "sha256-0RshrtmR0ttxlfTqGh/syhw4bQ0LM2d37CXbJ1BuVi8=";
           subPackages = [ "cmd/anker" ];
           env.CGO_ENABLED = "1";
           checkPhase = ''

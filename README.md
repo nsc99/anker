@@ -26,6 +26,18 @@ Use the same credentials as your Anki devices. The password can instead be read
 from `ANKER_PASSWORD_FILE`, which takes precedence over `ANKER_PASSWORD`.
 The service does not automatically load `.env`.
 
+Keep credentials in the Git-ignored `.env` file and restrict access with
+`chmod 600 .env`. Alternatively, set `ANKER_PASSWORD_FILE` to a private password
+file outside the repository with permissions `600`. Do not paste credentials
+into chat, commit them, or put them directly in command-line arguments.
+
+Sync requests use binary content type. Redirects preserve the compressed POST
+for up to five hops within the same origin, or a same-host HTTP-to-HTTPS upgrade
+on default ports. Metadata discovery follows official AnkiWeb server handoffs over HTTPS.
+Other redirects to login pages, other hosts, or URLs with query strings are refused. If this happens, configure the direct Anki server base URL
+and check reverse-proxy authentication instead of forwarding sync credentials
+through a browser login flow.
+
 ```sh
 nix develop --command go test -race ./...
 nix develop --command go vet ./...
@@ -41,7 +53,7 @@ index before using the commands above.
 
 | Environment variable | Default | Meaning |
 | --- | --- | --- |
-| `ANKER_SYNC_URL` | required | Self-hosted Anki sync server base URL |
+| `ANKER_SYNC_URL` | required | Anki sync server base URL |
 | `ANKER_USERNAME` | required | Sync account username |
 | `ANKER_PASSWORD` | required unless using a file | Sync account password |
 | `ANKER_PASSWORD_FILE` | unset | File containing the password |
@@ -59,8 +71,8 @@ Homepage runs elsewhere. The API itself has no authentication.
 
 ## Synchronization
 
-On startup and every configured interval, Anker logs in and downloads the full
-collection using Anki's sync protocol 11 (zstd). It validates SQLite integrity
+On startup and every configured interval, Anker logs in, checks sync metadata,
+resolves the account’s sync server, and downloads the full collection using Anki's sync protocol 11 (zstd). It validates SQLite integrity
 and required tables before atomically replacing its private snapshot. It never
 uploads changes or downloads media. Snapshots are limited to 1 GiB after
 decompression; review history is cached in memory.
@@ -69,7 +81,8 @@ This deliberately uses full downloads rather than incremental synchronization.
 Each download transfers the entire collection, advances the server's sync
 sequence, and may interrupt an ongoing client sync. Choose an interval suitable
 for your collection size; a device can retry its sync after a collision. The
-service is intended for the official self-hosted Anki sync server, not AnkiWeb.
+service supports the official self-hosted server and AnkiWeb metadata routing.
+For AnkiWeb, use `https://sync.ankiweb.net` as the base URL.
 See the [Anki server documentation](https://docs.ankiweb.net/sync-server.html)
 and the [upstream download implementation](https://github.com/ankitects/anki/blob/main/rslib/src/sync/collection/download.rs).
 
@@ -158,3 +171,12 @@ with `nix eval` against that revision. `go.mod` and `go.sum` pin SQLite driver
 `v1.14.52` and zstd library `v1.20.3`, verified using the
 [Go module proxy](https://proxy.golang.org/). All development tools come from
 the pinned nixpkgs revision.
+
+The sync wire format uses Anki compatibility identifier `26.09.3`, verified
+from [upstream `.version`](https://github.com/ankitects/anki/blob/main/.version).
+The client build identifier remains `anker`; this is a protocol compatibility
+baseline, not the exporter’s release version.
+
+SQLite connections register Anki’s `unicase` collation with Unicode case folding.
+The implementation uses `golang.org/x/text v0.43.0`, verified with
+`go list -m golang.org/x/text@latest` through the Go module registry.
