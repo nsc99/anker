@@ -4,6 +4,63 @@ A self-hosted Go service that downloads a separate collection from an Anki sync
 server and serves study statistics for [Homepage](https://gethomepage.dev/widgets/services/customapi/).
 It runs without Anki Desktop and never opens the sync server's live database.
 
+## Try it locally
+
+Start a complete demo with synthetic Anki data and a disposable PostgreSQL
+instance. It requires no Anki account or `.env` file:
+
+```sh
+nix run .#demo
+```
+
+Then open `http://127.0.0.1:8080/stats` or run:
+
+```sh
+curl http://127.0.0.1:8080/stats
+curl http://127.0.0.1:8080/readyz
+```
+
+The demo supplies 10 answers today, 60 seconds of study time, a three-day streak,
+and 80% retention. It refreshes every five seconds. The terminal prints commands
+to simulate a sync outage and recover it; during an outage `/stats` retains the
+last good data with `stale: true`, and `/readyz` returns 503.
+
+For a repeatable automated smoke test:
+
+```sh
+nix run .#demo -- --check --port 18080
+```
+
+This verifies PostgreSQL import, fresh JSON statistics, and recovery after a
+restart with the sync server unavailable, then exits and cleans up. Use
+`--port PORT` with either local app if port 8080 is already occupied.
+
+To use your actual Anki account with the same local PostgreSQL setup:
+
+```sh
+cp .env.example .env
+chmod 600 .env
+# Edit .env with your Anki server URL and credentials.
+nix run .#dev
+```
+
+The `dev` app automatically loads `.env` from the current directory, or the file
+specified by `ANKER_ENV_FILE`, and also accepts exported environment variables.
+It synchronizes the configured Anki account. The `demo` app clears inherited
+Anker configuration and uses only its synthetic server.
+
+Both local apps use a private Unix socket for PostgreSQL and delete their local
+database, collections, and temporary files when stopped with Ctrl+C. They
+always override database connection settings with the disposable local database.
+Use the normal `nix run .` service with `ANKER_DATABASE_URL` for a persistent or
+cloud database. No global database service or container runtime is installed.
+
+Run the complete automated regression suite with:
+
+```sh
+nix flake check
+```
+
 ## Develop and run
 
 Nix flakes provide Go, gopls, PostgreSQL tools, and the C compiler environment
