@@ -34,4 +34,6 @@ curl -fsS http://127.0.0.1:18080/healthz >/dev/null
 curl -fsS http://127.0.0.1:18080/stats | jq -e \
   '.sync_ok and (.stale | not) and .reviews_today == 10 and .study_streak == 3 and .retention_percent == 80' >/dev/null
 [ "$(docker inspect -f '{{.Config.User}}' "$container_id")" = 10001:10001 ]
+curl -fsS 'http://127.0.0.1:18080/activity?days=3' | jq -e \
+  '.sync_ok and (.stale | not) and (.days | length) == 3 and ([.days[].reviews] | add) == 12 and .timezone == "UTC" and .study_streak == 3' >/dev/null
 echo 'PASS: non-root container downloads a collection and serves fresh statistics.'
