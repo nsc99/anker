@@ -1,3 +1,5 @@
+> **Vibe coded:** This project was built with AI.
+
 # Anker — Anki Stats Exporter
 
 A self-hosted Go service that downloads a separate collection from an Anki sync
