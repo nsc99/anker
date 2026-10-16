@@ -1,6 +1,62 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
-    "config:recommended"
+    "config:recommended",
+    "helpers:pinGitHubActionDigests"
+  ],
+  "enabledManagers": ["gomod", "github-actions", "nix"],
+  "timezone": "Europe/Berlin",
+  "schedule": ["* 0-6 * * 1"],
+  "prConcurrentLimit": 3,
+  "semanticCommits": "enabled",
+  "semanticCommitType": "chore",
+  "semanticCommitScope": "deps",
+  "automerge": false,
+  "nix": {
+    "enabled": true,
+    "lockFileMaintenance": {
+      "enabled": true,
+      "schedule": ["* 0-6 * * 1"]
+    }
+  },
+  "gomod": {
+    "postUpdateOptions": ["gomodTidy"],
+    "constraintsFiltering": "strict"
+  },
+  "packageRules": [
+    {
+      "description": "Keep module updates buildable with the Nix vendor pin",
+      "matchManagers": ["gomod"],
+      "matchDatasources": ["go"],
+      "prBodyNotes": [
+        "Update `flake.nix`'s `vendorHash` in this PR after changing `go.mod`/`go.sum`, then run `nix build`. See [dependency maintenance](https://github.com/nsc99/anker/blob/master/docs/DEPENDENCIES.md)."
+      ]
+    },
+    {
+      "description": "Group routine Go module updates",
+      "matchManagers": ["gomod"],
+      "matchDatasources": ["go"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "Go modules",
+      "groupSlug": "go-modules"
+    },
+    {
+      "description": "The Go toolchain is supplied by pinned nixpkgs",
+      "matchManagers": ["gomod"],
+      "matchDepTypes": ["golang", "toolchain"],
+      "enabled": false
+    },
+    {
+      "description": "Group routine updates while retaining Action SHA pins",
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["minor", "patch", "digest", "pin", "pinDigest"],
+      "groupName": "GitHub Actions",
+      "groupSlug": "github-actions"
+    },
+    {
+      "description": "Review each major upgrade independently",
+      "matchUpdateTypes": ["major"],
+      "groupName": null
+    }
   ]
 }

@@ -364,6 +364,9 @@ Homepage's mapping and duration format follow its
 
 ## Dependency pins
 
+See [dependency maintenance](docs/DEPENDENCIES.md) for Renovate scheduling,
+update groups, and the required Nix vendor-hash update on Go dependency PRs.
+
 `flake.lock` pins nixpkgs commit `319e4cebef10cbb636c6ea392137b52ad105336a`
 (resolved from `nixpkgs-unstable`). Its Go package was verified as `1.26.8`
 with `nix eval` against that revision. `go.mod` and `go.sum` pin SQLite driver
